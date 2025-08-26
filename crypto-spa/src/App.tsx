@@ -56,6 +56,7 @@ const BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr";
 const BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines";
 const PINNED_SYMBOL = "VANRYUSDT"; // must appear first
 const POLL_MS = 15000; // refresh list every 15s
+const DRAWER_W = 560; // px
 
 // Basic timeframe presets → Binance intervals + reasonable point counts
 const TIMEFRAMES: {
@@ -86,19 +87,24 @@ function classNames(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
 
-// Persisted theme helper
+// Persisted theme helper (class on <html>)
 function useTheme() {
-  const [theme, setTheme] = useState<string>(() => {
-    const stored = localStorage.getItem("theme");
+  type Theme = "light" | "dark";
+  const [theme, setTheme] = useState<Theme>(() => {
+    const stored = localStorage.getItem("theme") as Theme | null;
     if (stored === "dark" || stored === "light") return stored;
-    const prefersDark = window.matchMedia?.(
-      "(prefers-color-scheme: dark)"
-    ).matches;
+    const prefersDark =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-color-scheme: dark)").matches;
     return prefersDark ? "dark" : "light";
   });
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
+    const root = document.documentElement;
+    root.setAttribute("data-theme", theme); // <html data-theme="...">
+    root.classList.toggle("dark", theme === "dark"); // keeps `dark:` utilities working
+    document.body.classList.remove("dark"); // neutralize stray body.dark
+    (root as HTMLElement).style.colorScheme = theme; // native controls
     localStorage.setItem("theme", theme);
   }, [theme]);
 
@@ -300,7 +306,7 @@ function Chart({ symbol }: { symbol: string }) {
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={points}
-              margin={{ top: 8, right: 8, bottom: 8, left: 0 }}
+              margin={{ top: 8, right: 8, bottom: 36, left: 0 }}
             >
               <CartesianGrid
                 strokeDasharray="3 3"
@@ -346,6 +352,48 @@ function Chart({ symbol }: { symbol: string }) {
             </LineChart>
           </ResponsiveContainer>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Simple slide-in drawer that stays mounted to allow smooth transitions
+function Drawer({
+  open,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={classNames(
+        "fixed inset-0 z-20 overflow-hidden transition-[opacity]",
+        open
+          ? "opacity-100 pointer-events-auto"
+          : "opacity-0 pointer-events-none"
+      )}
+    >
+      {/* Backdrop */}
+      <div
+        className={classNames(
+          "absolute inset-0 bg-black/40 transition-opacity duration-300",
+          open ? "opacity-100" : "opacity-0"
+        )}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      {/* Panel */}
+      <div
+        className={classNames(
+          "absolute right-0 top-0 h-full w-full sm:w-[560px] bg-white dark:bg-zinc-900 shadow-xl border-l border-zinc-200 dark:border-zinc-800 p-4 sm:p-6 overflow-y-auto",
+          "transform transition-transform duration-300 will-change-transform",
+          open ? "translate-x-0" : "translate-x-full"
+        )}
+      >
+        {children}
       </div>
     </div>
   );
@@ -398,7 +446,6 @@ export default function App() {
         (t) => isFinite(t.priceChangePercent) && t.priceChangePercent < 0
       );
 
-    // Always keep VANRY/USDT as the first row if it matches the filters/search
     const idx = list.findIndex((t) => t.symbol === PINNED_SYMBOL);
     if (idx > 0) {
       const [vanry] = list.splice(idx, 1);
@@ -407,13 +454,18 @@ export default function App() {
     return list;
   }, [tickers, search, filter]);
 
-  const selectedSymbol = selected?.symbol ?? null;
+  const reserveRightPadding = selected ? `lg:pr-[${DRAWER_W + 20}px]` : ""; // +20 for gutter
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
+    // <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
+    <div className="min-h-screen overflow-x-hidden bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
       {/* Header */}
       <header className="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-white/70 dark:supports-[backdrop-filter]:bg-zinc-900/60 bg-white/90 dark:bg-zinc-900/80 border-b border-zinc-200 dark:border-zinc-800">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-3 flex items-center gap-3">
+        <div
+          className={classNames(
+            "mx-auto w-full px-4 sm:px-6 py-3 flex items-center gap-3 transition-[padding] duration-300"
+          )}
+        >
           <div className="font-semibold tracking-tight text-lg sm:text-xl">
             Crypto Prices — USDT Pairs
           </div>
@@ -436,13 +488,20 @@ export default function App() {
       </header>
 
       {/* Controls */}
-      <section className="mx-auto max-w-6xl px-4 sm:px-6 mt-4">
+      <section
+        className={classNames(
+          "mx-auto w-full px-4 sm:px-6 mt-4 transition-[padding] duration-300"
+        )}
+      >
         <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-2.5 h-5 w-5 text-zinc-400" />
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setSelected(null);
+              }}
               placeholder="Search symbol (e.g., VANRY, BTC)…"
               className="w-full pl-10 pr-4 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
@@ -457,7 +516,10 @@ export default function App() {
             ).map(({ key, label }) => (
               <button
                 key={key}
-                onClick={() => setFilter(key)}
+                onClick={() => {
+                  setFilter(key);
+                  setSelected(null);
+                }}
                 className={classNames(
                   "px-3 py-2 rounded-xl border",
                   filter === key
@@ -474,7 +536,11 @@ export default function App() {
       </section>
 
       {/* List */}
-      <main className="mx-auto max-w-6xl px-4 sm:px-6 mt-4 pb-24">
+      <main
+        className={classNames(
+          "mx-auto w-full px-4 sm:px-6 mt-4 pb-24 transition-[padding] duration-300"
+        )}
+      >
         {error && (
           <div className="mb-4 p-3 rounded-lg border border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:border-rose-900">
             Failed to load prices: {error}
@@ -492,15 +558,10 @@ export default function App() {
         )}
       </main>
 
-      {/* Detail Drawer */}
-      {selected && (
-        <div className="fixed inset-0 z-20">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setSelected(null)}
-            aria-hidden="true"
-          />
-          <div className="absolute right-0 top-0 h-full w-full sm:w-[560px] bg-white dark:bg-zinc-900 shadow-xl border-l border-zinc-200 dark:border-zinc-800 p-4 sm:p-6 overflow-y-auto">
+      {/* Detail Drawer (kept mounted for smooth enter/exit) */}
+      <Drawer open={!!selected} onClose={() => setSelected(null)}>
+        {selected && (
+          <>
             <div className="flex items-start justify-between">
               <div>
                 <div className="text-lg sm:text-xl font-semibold">
@@ -543,17 +604,17 @@ export default function App() {
               <Chart symbol={selected.symbol} />
             </div>
 
-            <div className="mt-6 text-sm text-zinc-500">
+            <div className="mt-3 pt-1 text-xs sm:text-sm text-zinc-500">
               Data source: Binance public API (spot). Times in your local
               timezone.
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Drawer>
 
       {/* Footer */}
       <footer className="border-t border-zinc-200 dark:border-zinc-800 py-6">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 text-xs text-zinc-500 flex flex-wrap items-center gap-2">
+        <div className="mx-auto w-full px-4 sm:px-6 text-xs text-zinc-500 flex flex-wrap items-center gap-2">
           <span>Built with React + Tailwind + Recharts.</span>
           <span>Updates every {Math.round(POLL_MS / 1000)}s.</span>
           <span>VANRY/USDT is always shown first as requested.</span>
